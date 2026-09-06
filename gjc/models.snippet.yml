@@ -1,0 +1,24 @@
+# Reference GJC provider block. Prefer generating this from your model.env with
+#   ./scripts/render-gjc-config.sh
+# Merge into ~/.gjc/agent/models.yml. Strict schema: unknown keys fail validation.
+# Replace <ALIAS> with your model id. For text-only: baseUrl -> :8080, input: [text],
+# and drop the `thinking:` block if reasoning: false.
+providers:
+  <ALIAS>-local:
+    baseUrl: http://127.0.0.1:8081/v1     # webp proxy (vision); :8080 directly if text-only
+    api: openai-completions               # -> /v1/chat/completions
+    auth: none                            # trusted localhost
+    models:
+      - id: <ALIAS>                        # MUST match llama-server --alias
+        name: <ALIAS> (local)
+        input: [text, image]              # [text] only for text-only models
+        reasoning: true                   # true if the model has a thinking mode
+        thinking:                         # omit whole block if reasoning: false
+          minLevel: low
+          maxLevel: xhigh
+          mode: effort
+          defaultLevel: high
+          levels: [low, medium, high, xhigh]
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        contextWindow: 65536              # match serve.sh CTX_SIZE
+        maxTokens: 32768

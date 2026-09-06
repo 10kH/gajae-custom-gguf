@@ -1,0 +1,14 @@
+# per-machine config (copied from model.env.example)
+model.env
+*.env
+!model.env.example
+!examples/*.env
+
+# runtime logs
+*.log
+
+# never commit weights
+*.gguf
+
+__pycache__/
+*.pyc
