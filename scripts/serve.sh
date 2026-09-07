@@ -3,15 +3,19 @@
 # Usage: ./scripts/serve.sh [GPU] [PORT]   (args override model.env)
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=scripts/common.sh
+source "$ROOT/scripts/common.sh"
+# shellcheck disable=SC1090
 source "${MODEL_ENV:-$ROOT/model.env}"
 
 GPU="${1:-${GPU:-0}}"
 PORT="${2:-${SPORT:-8080}}"
-BIN="${LLAMA_BIN:-$HOME/llama.cpp/build/bin/llama-server}"
+BIN="${LLAMA_BIN:-${LLAMA_SRC:-$HOME/llama.cpp}/build/bin/llama-server}"
 MODEL="$MODEL_DIR/$MODEL_FILE"
 
-[ -x "$BIN" ]   || { echo "llama-server not found at $BIN — run scripts/build-llama.sh" >&2; exit 1; }
-[ -f "$MODEL" ] || { echo "model not found at $MODEL — run scripts/download.sh" >&2; exit 1; }
+[ -x "$BIN" ]   || { err "llama-server not found at $BIN — run scripts/build-llama.sh (or set LLAMA_BIN)"; exit 1; }
+[ -f "$MODEL" ] || { err "model not found at $MODEL — run scripts/download.sh"; exit 1; }
+gpu_preflight "$GPU" "$MODEL"
 
 export CUDA_VISIBLE_DEVICES="$GPU"
 

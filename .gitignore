@@ -6,6 +6,7 @@ model.env
 
 # runtime logs
 *.log
+logs/
 
 # never commit weights
 *.gguf

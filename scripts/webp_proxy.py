@@ -8,17 +8,26 @@ uses stb_image, which decodes jpg/png/bmp/gif but NOT webp -> "400 Failed to
 load image". This rewrites `data:image/webp;base64,...` to PNG in JSON request
 bodies in-flight. Everything else (streaming SSE, headers) passes through.
 
-Env: UPSTREAM (default http://127.0.0.1:8080), PROXY_HOST (127.0.0.1), PROXY_PORT (8081).
+    python webp_proxy.py --upstream http://127.0.0.1:8080 --port 8081
+
+Flags fall back to env (UPSTREAM, PROXY_HOST, PROXY_PORT). Prefer the flags:
+they put the port in the process command line, which is how stop.sh targets one
+model's proxy without killing another's.
+
 Text-only models don't need this — point GJC straight at the llama-server port.
 """
-import base64, io, json, os
+import argparse, base64, io, json, os
 from aiohttp import web, ClientSession, ClientTimeout
 from PIL import Image
 
-UPSTREAM = os.environ.get("UPSTREAM", "http://127.0.0.1:8080")
-LISTEN   = os.environ.get("PROXY_HOST", "127.0.0.1")
-PORT     = int(os.environ.get("PROXY_PORT", "8081"))
-WEBP     = "data:image/webp;base64,"
+ap = argparse.ArgumentParser()
+ap.add_argument("--upstream", default=os.environ.get("UPSTREAM", "http://127.0.0.1:8080"))
+ap.add_argument("--host",     default=os.environ.get("PROXY_HOST", "127.0.0.1"))
+ap.add_argument("--port",     type=int, default=int(os.environ.get("PROXY_PORT", "8081")))
+ARGS = ap.parse_args()
+
+UPSTREAM = ARGS.upstream
+WEBP = "data:image/webp;base64,"
 
 
 def _webp_png(u):
@@ -67,5 +76,5 @@ async def handler(req):
 
 app = web.Application(client_max_size=1024 ** 3)
 app.router.add_route("*", "/{tail:.*}", handler)
-print(f"[proxy] {LISTEN}:{PORT} -> {UPSTREAM}")
-web.run_app(app, host=LISTEN, port=PORT, print=None)
+print(f"[proxy] {ARGS.host}:{ARGS.port} -> {UPSTREAM}")
+web.run_app(app, host=ARGS.host, port=ARGS.port, print=None)

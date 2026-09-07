@@ -38,6 +38,7 @@ gjc --model <ALIAS>-local/<ALIAS> @photo.png "Describe this image."
 |------|------|
 | `model.env.example` | the one config file — copy to `model.env`, fill in once |
 | `examples/*.env` | ready-made configs (vision + text-only) |
+| `scripts/common.sh` | environment discovery (conda/python/CUDA/GPU) shared by the rest |
 | `scripts/build-llama.sh` | build CUDA `llama.cpp` (one-time per machine) |
 | `scripts/download.sh` | fetch weights (+ mmproj) from Hugging Face; `--list` shows quants |
 | `scripts/serve.sh` | run llama-server from `model.env` (no hardcoding) |
@@ -75,21 +76,21 @@ Run a **second** model from another env with `MODEL_ENV=other.env ./scripts/star
 
 ## 1. Prerequisites (no sudo)
 
-A C/C++ compiler, `git`, `make`, a **CUDA toolkit** (`nvcc`), and `conda`/miniforge:
+A C/C++ compiler, `git`, `cmake`, `curl`, a **CUDA toolkit** (`nvcc`), and a
+python with a few packages. You do **not** need to tell the scripts where any of
+it lives — see [Portability](#portability).
 
 ```bash
-gcc --version; git --version; make --version
-ls -d /usr/local/cuda-*                    # find a toolkit (need nvcc)
-"$CUDA_HOME"/bin/nvcc --version            # confirm nvcc
+gcc --version; git --version; cmake --version
 nvidia-smi                                 # confirm driver + GPUs
 
-conda create -y -n gguf python=3.11
+conda create -y -n gguf python=3.11        # any python works; conda is just convenient
 conda activate gguf
-pip install -U huggingface_hub cmake Pillow aiohttp openai
+pip install -U huggingface_hub Pillow aiohttp openai
 ```
 
 The GPU driver's CUDA version can be newer than the toolkit — that's fine
-(backward compatible).
+(backward compatible). The reverse is not, and the build script checks for it.
 
 ---
 
@@ -99,8 +100,8 @@ The GPU driver's CUDA version can be newer than the toolkit — that's fine
 ./scripts/build-llama.sh
 ```
 
-Uses `CUDA_HOME` / `CUDA_ARCHS` from `model.env` (80=A100, 86=RTX30xx, 89=RTX40xx,
-90=H100). Binaries land in `~/llama.cpp/build/bin/`.
+The CUDA toolkit and your GPUs' compute capabilities are **auto-detected** — no
+editing required for a normal box. Binaries land in `~/llama.cpp/build/bin/`.
 
 > **Why build from source** instead of Ollama/prebuilt wheels? Brand-new
 > architectures land in `llama.cpp` master first; old Ollama / lagging pip wheels
@@ -128,7 +129,18 @@ curl -s http://127.0.0.1:8080/v1/models     # sanity check — should list your 
 
 `serve.sh` runs with `--parallel 1 --ctx-size <CTX_SIZE>` (one big slot so long
 "thinking" is never truncated) and `--reasoning-budget -1` (unrestricted). For
-vision, `start.sh` also launches the WebP proxy (§7).
+vision, `start.sh` also launches the WebP proxy (§7). Logs go to
+`logs/<ALIAS>-{server,proxy}.log`.
+
+**Several models at once** — give each its own env file and ports:
+
+```bash
+MODEL_ENV=./other-model.env ./scripts/start.sh     # SPORT/PPORT differ in that file
+MODEL_ENV=./other-model.env ./scripts/stop.sh      # stops only that model
+```
+
+`stop.sh` targets the llama-server by its `--alias` and the proxy by its
+listening port, so stopping one model never touches another.
 
 ---
 
@@ -203,6 +215,42 @@ multimodal loader uses `stb_image`, which handles **jpg/png/bmp/gif but NOT
 webp** → the server returns `400 Failed to load image`. `webp_proxy.py`
 transcodes `data:image/webp` → PNG in-flight (llama.cpp's own web UI does the
 same). **Text-only models don't need it** — point GJC straight at `:8080`.
+
+---
+
+## Portability
+
+Nothing about one machine is baked in. `scripts/common.sh` discovers the
+environment at run time, and every probe has an override you can set in
+`model.env` for a layout it guesses wrong:
+
+| Discovered | How | Override |
+|------------|-----|----------|
+| conda | `miniforge3`, `mambaforge`, `miniconda3`, `anaconda3`, `/opt/conda`, `$CONDA_EXE`, `conda info --base` | `CONDA_SH` |
+| python | `$PYTHON` → `python3` → `python`, resolved to an **absolute** path after activating `CONDA_ENV` | `PYTHON` |
+| CUDA toolkit | `nvcc` on `PATH` → newest `/usr/local/cuda-*` **that the driver can actually run** → `$CONDA_PREFIX` | `CUDA_HOME` |
+| GPU arch | `nvidia-smi --query-gpu=compute_cap` (e.g. `8.0`,`9.0` → `80;90`), else `native` | `CUDA_ARCHS` |
+| llama.cpp | `$LLAMA_SRC/build/bin/llama-server` | `LLAMA_SRC`, `LLAMA_BIN` |
+| HF downloader | `hf` → `huggingface-cli` → `huggingface_hub` python API | — |
+
+Two deliberate design rules:
+
+- **Missing dependencies fail loudly.** If the resolved python can't import
+  `aiohttp`/`Pillow`, `start.sh` stops and prints the exact `pip install` line.
+  Silently falling back to an interpreter without them produces a proxy that
+  dies with an unrelated-looking error.
+- **Kills are scoped and never suicidal.** Processes are matched by `--alias` or
+  listening port, and this process plus its ancestors are excluded — a plain
+  `pkill -f webp_proxy.py` kills the shell that launched it, because that
+  shell's own command line contains the pattern.
+
+Before a multi-minute model load, `start.sh` also warns if no GPU is visible,
+if `GPU` exceeds the device count, or if the model file is larger than the
+roomiest card's free VRAM.
+
+> One caveat it can't solve for you: on multi-GPU boxes `CUDA_VISIBLE_DEVICES`
+> ordering need not match `nvidia-smi`'s. Confirm placement with
+> `nvidia-smi --query-compute-apps=pid,used_memory --format=csv`.
 
 ---
 
