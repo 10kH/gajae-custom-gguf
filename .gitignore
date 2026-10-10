@@ -13,3 +13,6 @@ logs/
 
 __pycache__/
 *.pyc
+
+# agent session state
+.omc/
